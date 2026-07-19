@@ -390,12 +390,13 @@ pub fn main() void {
             parseWsArg(arg, &ws_addr, &ws_port);
             continue;
         }
-        ws_arg_pending = false;
+        if (ws_arg_pending) ws_arg_pending = false;
 
         if (std.mem.eql(u8, arg, "--init-config")) {
             initConfig();
             return;
         } else if (std.mem.eql(u8, arg, "--ws")) {
+            // Allows `--ws` to re-enable the listener after an earlier `--no-ws`.
             ws_enabled = true;
             ws_arg_pending = true;
         } else if (std.mem.eql(u8, arg, "--no-ws")) {
@@ -404,7 +405,6 @@ pub fn main() void {
             unix_enabled = false;
         } else {
             log.err("unknown argument: {s}", .{arg});
-            ws_arg_pending = false;
             return;
         }
     }
