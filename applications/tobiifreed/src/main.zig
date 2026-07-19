@@ -630,3 +630,11 @@ fn transportRecv(buf: []u8) ?usize {
 fn transportTryRecv(buf: []u8) ?usize {
     return transport.tryRecv(buf);
 }
+
+test "isFlag detects CLI flags" {
+    try std.testing.expect(isFlag("--ws"));
+    try std.testing.expect(isFlag("-h"));
+    try std.testing.expect(!isFlag("7081"));
+    try std.testing.expect(!isFlag("127.0.0.1:7081"));
+    try std.testing.expect(!isFlag(""));
+}

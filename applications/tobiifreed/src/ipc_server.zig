@@ -22,3 +22,19 @@ else
 
         pub fn deinit(_: *@This()) void {}
     };
+
+fn testForward(_: std.posix.fd_t, _: u8, _: []const u8, _: bool) void {}
+
+test "supported matches target platform" {
+    try std.testing.expectEqual(builtin.os.tag != .windows, supported);
+}
+
+test "server api is callable on this platform" {
+    if (supported) return;
+
+    var server = try Server.init(&testForward);
+    server.acceptClients();
+    server.readCommands();
+    server.broadcastGaze(0);
+    server.deinit();
+}
