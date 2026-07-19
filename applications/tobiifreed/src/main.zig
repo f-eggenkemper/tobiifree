@@ -385,28 +385,14 @@ pub fn main() void {
     var args = std.process.args();
     _ = args.next();
     while (args.next()) |arg| {
-        if (ws_arg_pending) {
-            if (!(arg.len > 0 and arg[0] == '-')) {
-                parseWsArg(arg, &ws_addr, &ws_port);
-            } else if (std.mem.eql(u8, arg, "--init-config")) {
-                initConfig();
-                return;
-            } else if (std.mem.eql(u8, arg, "--ws")) {
-                ws_enabled = true;
-                ws_arg_pending = true;
-                continue;
-            } else if (std.mem.eql(u8, arg, "--no-ws")) {
-                ws_enabled = false;
-                ws_arg_pending = false;
-                continue;
-            } else if (std.mem.eql(u8, arg, "--no-unix")) {
-                unix_enabled = false;
-                ws_arg_pending = false;
-                continue;
-            }
+        if (ws_arg_pending and !isFlag(arg)) {
             ws_arg_pending = false;
+            parseWsArg(arg, &ws_addr, &ws_port);
             continue;
-        } else if (std.mem.eql(u8, arg, "--init-config")) {
+        }
+        ws_arg_pending = false;
+
+        if (std.mem.eql(u8, arg, "--init-config")) {
             initConfig();
             return;
         } else if (std.mem.eql(u8, arg, "--ws")) {
@@ -416,6 +402,10 @@ pub fn main() void {
             ws_enabled = false;
         } else if (std.mem.eql(u8, arg, "--no-unix")) {
             unix_enabled = false;
+        } else {
+            log.err("unknown argument: {s}", .{arg});
+            ws_arg_pending = false;
+            return;
         }
     }
     if (!ipc_server.supported) unix_enabled = false;
@@ -478,7 +468,7 @@ pub fn main() void {
     defer if (ws) |*w| w.deinit();
 
     if (!server_running and !ws_enabled) {
-        log.err("no IPC transports enabled; leave WebSocket enabled or omit --no-unix", .{});
+        log.err("no IPC transports enabled; enable WebSocket or Unix socket", .{});
         return;
     }
 
@@ -592,6 +582,10 @@ fn parseIpv4(s: []const u8) ?u32 {
     if (count != 3) return null;
     octets[3] = std.fmt.parseInt(u8, s[start..], 10) catch return null;
     return @bitCast(octets);
+}
+
+fn isFlag(arg: []const u8) bool {
+    return arg.len > 0 and arg[0] == '-';
 }
 
 // ── USB thread ─────────────────────────────────────────────────────
