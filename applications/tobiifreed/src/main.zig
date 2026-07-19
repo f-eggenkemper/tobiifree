@@ -388,13 +388,25 @@ pub fn main() void {
         if (ws_arg_pending) {
             if (!(arg.len > 0 and arg[0] == '-')) {
                 parseWsArg(arg, &ws_addr, &ws_port);
+            } else if (std.mem.eql(u8, arg, "--init-config")) {
+                initConfig();
+                return;
+            } else if (std.mem.eql(u8, arg, "--ws")) {
+                ws_enabled = true;
+                ws_arg_pending = true;
+                continue;
+            } else if (std.mem.eql(u8, arg, "--no-ws")) {
+                ws_enabled = false;
+                ws_arg_pending = false;
+                continue;
+            } else if (std.mem.eql(u8, arg, "--no-unix")) {
+                unix_enabled = false;
                 ws_arg_pending = false;
                 continue;
             }
             ws_arg_pending = false;
-        }
-
-        if (std.mem.eql(u8, arg, "--init-config")) {
+            continue;
+        } else if (std.mem.eql(u8, arg, "--init-config")) {
             initConfig();
             return;
         } else if (std.mem.eql(u8, arg, "--ws")) {
@@ -406,6 +418,7 @@ pub fn main() void {
             unix_enabled = false;
         }
     }
+    if (!ipc_server.supported) unix_enabled = false;
 
     // Load config.
     const display = loadDisplayArea();
