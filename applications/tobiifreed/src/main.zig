@@ -55,7 +55,7 @@ fn onGaze(sample: *const core.GazeSample) void {
     const w = gaze_write.load(.monotonic);
     gaze_ring[w % GAZE_RING_SIZE] = sample.*;
     gaze_write.store(w +% 1, .release);
-    if (notify_pipe_ready and builtin.os.tag != .windows) {
+    if (notify_pipe_ready) {
         // Wake main thread (non-blocking write, ok if pipe buffer is full).
         _ = std.posix.write(notify_pipe[1], &.{1}) catch {};
     }
@@ -63,7 +63,7 @@ fn onGaze(sample: *const core.GazeSample) void {
 
 /// Drain the ring buffer and broadcast (called from main thread).
 fn drainGaze() void {
-    if (notify_pipe_ready and builtin.os.tag != .windows) {
+    if (notify_pipe_ready) {
         // Drain notification pipe.
         var drain_buf: [64]u8 = undefined;
         _ = std.posix.read(notify_pipe[0], &drain_buf) catch {};
@@ -408,8 +408,6 @@ pub fn main() void {
             return;
         }
     }
-    if (!ipc_server.supported) unix_enabled = false;
-
     // Load config.
     const display = loadDisplayArea();
     log.info("display_area {d:.0}x{d:.0}mm  origin=({d:.0},{d:.0})  z={d:.0}  tilt={d:.2}", .{
@@ -480,7 +478,7 @@ pub fn main() void {
         };
         notify_pipe_ready = true;
     }
-    defer if (notify_pipe_ready and builtin.os.tag != .windows) {
+    defer if (notify_pipe_ready) {
         std.posix.close(notify_pipe[0]);
         std.posix.close(notify_pipe[1]);
     };
