@@ -380,32 +380,33 @@ pub fn main() void {
     var ws_port: u16 = 7081;
     var ws_enabled: bool = true;
     var unix_enabled: bool = ipc_server.supported;
-    var ws_arg_pending: bool = false;
 
-    var args = std.process.args();
-    _ = args.next();
-    while (args.next()) |arg| {
-        const pending_ws_arg = ws_arg_pending;
-        ws_arg_pending = false;
+    const allocator = std.heap.page_allocator;
+    const args = std.process.argsAlloc(allocator) catch {
+        log.err("failed to read arguments", .{});
+        return;
+    };
+    defer std.process.argsFree(allocator, args);
 
-        if (pending_ws_arg and !isFlag(arg)) {
-            parseWsArg(arg, &ws_addr, &ws_port);
-            continue;
-        }
-
+    var i: usize = 1;
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
         if (std.mem.eql(u8, arg, "--init-config")) {
             initConfig();
             return;
         } else if (std.mem.eql(u8, arg, "--ws")) {
             // Allows `--ws` to re-enable the listener after an earlier `--no-ws`.
             ws_enabled = true;
-            ws_arg_pending = true;
+            if (i + 1 < args.len and !isFlag(args[i + 1])) {
+                i += 1;
+                parseWsArg(args[i], &ws_addr, &ws_port);
+            }
         } else if (std.mem.eql(u8, arg, "--no-ws")) {
             ws_enabled = false;
         } else if (std.mem.eql(u8, arg, "--no-unix")) {
             unix_enabled = false;
         } else {
-            log.err("unknown argument: {s} (valid: --init-config, --ws [addr:port|port], --no-ws, --no-unix)", .{arg});
+            log.err("unknown argument: {s} (valid: --init-config, --ws [addr:port|port], --no-ws, --no-unix; default ws=127.0.0.1:7081)", .{arg});
             return;
         }
     }
@@ -467,7 +468,7 @@ pub fn main() void {
     defer if (ws) |*w| w.deinit();
 
     if (!server_running and !ws_enabled) {
-        log.err("no IPC transports enabled; enable WebSocket or Unix socket", .{});
+        log.err("no IPC transports enabled; remove --no-ws or, on Unix platforms, remove --no-unix", .{});
         return;
     }
 
