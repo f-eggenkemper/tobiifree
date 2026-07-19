@@ -372,6 +372,18 @@ fn installSignalHandlers() void {
     std.posix.sigaction(std.posix.SIG.INT, &act, null);
 }
 
+fn printUsage() void {
+    std.debug.print(
+        \\Usage:
+        \\  tobiifreed [--init-config] [--ws [addr:port|port]] [--no-ws] [--no-unix]
+        \\
+        \\Defaults:
+        \\  WebSocket: ws://127.0.0.1:7081
+        \\  Unix socket: enabled on Unix platforms
+        \\
+    , .{});
+}
+
 // ── Main ────────────────────────────────────────────────────────────
 
 pub fn main() void {
@@ -382,8 +394,8 @@ pub fn main() void {
     var unix_enabled: bool = ipc_server.supported;
 
     const allocator = std.heap.page_allocator;
-    const args = std.process.argsAlloc(allocator) catch {
-        log.err("failed to read arguments", .{});
+    const args = std.process.argsAlloc(allocator) catch |err| {
+        log.err("failed to read arguments: {}", .{err});
         return;
     };
     defer std.process.argsFree(allocator, args);
@@ -391,7 +403,10 @@ pub fn main() void {
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
-        if (std.mem.eql(u8, arg, "--init-config")) {
+        if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+            printUsage();
+            return;
+        } else if (std.mem.eql(u8, arg, "--init-config")) {
             initConfig();
             return;
         } else if (std.mem.eql(u8, arg, "--ws")) {
@@ -406,7 +421,7 @@ pub fn main() void {
         } else if (std.mem.eql(u8, arg, "--no-unix")) {
             unix_enabled = false;
         } else {
-            log.err("unknown argument: {s} (valid: --init-config, --ws [addr:port|port], --no-ws, --no-unix; default ws=127.0.0.1:7081)", .{arg});
+            log.err("unknown argument: {s}; run with --help for usage", .{arg});
             return;
         }
     }
@@ -468,7 +483,11 @@ pub fn main() void {
     defer if (ws) |*w| w.deinit();
 
     if (!server_running and !ws_enabled) {
-        log.err("no IPC transports enabled; remove --no-ws or, on Unix platforms, remove --no-unix", .{});
+        if (ipc_server.supported) {
+            log.err("no IPC transports enabled; enable WebSocket or Unix socket", .{});
+        } else {
+            log.err("no IPC transports enabled; enable WebSocket", .{});
+        }
         return;
     }
 
