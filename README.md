@@ -14,7 +14,7 @@ The Tobii Eye Tracker 5 (ET5) ships with Windows-only drivers and no public prot
 
 - **driver/** — Zig implementation of the TTP/TLV framing protocol. Compiles to both WebAssembly (for the browser SDK) and native (for the Linux applications). Pure byte-level protocol engine — no allocator, no syscalls.
 - **sdk/** — TypeScript SDK wrapping the wasm core. Works in the browser (WebUSB) and Node.js (`usb` package). `Tobii.fromUsb()` to connect, `subscribeToGaze()` to stream.
-- **applications/tobiifreed** — Linux daemon. Talks to the tracker over libusb, exposes gaze data over a Unix socket (and optionally WebSocket).
+- **applications/tobiifreed** — native daemon/sidecar. Talks to the tracker over libusb, exposes gaze data over loopback WebSocket/TCP and, on Unix platforms, an optional Unix socket.
 - **applications/tobiifree-overlay** — GTK4 + layer-shell overlay that draws a gaze dot on your Wayland desktop. Connects directly via USB or through the daemon.
 - **applications/tobiifree-demo** — Browser app for live gaze visualization, calibration, and display area configuration. Hosted on GitHub Pages.
 - **assets/** — Firmware tools (DFU flash/extract) and udev rules.
@@ -37,7 +37,7 @@ sudo udevadm control --reload && sudo udevadm trigger
 ### Build and run
 
 ```sh
-# Run the daemon (direct USB)
+# Run the daemon sidecar (direct USB, WebSocket on ws://127.0.0.1:7081 by default)
 just tobiifreed
 
 # Run the gaze overlay (direct USB)
@@ -66,6 +66,20 @@ nix build .#tobiifree-demo     # static SPA (deployable to any web server)
 |--------|---------|--------|
 | Tobii Eye Tracker 5 (runtime) | `2104:0313` | Working — gaze, calibration, display area |
 | Tobii Eye Tracker 5 (bootloader) | `2104:0102` | DFU flash only |
+
+## .NET / Avalonia integration
+
+For desktop apps, prefer running `tobiifreed` as a local sidecar and connect to
+`ws://127.0.0.1:7081` from your app. That keeps USB ownership and protocol state
+inside the daemon while your UI talks to a stable loopback WebSocket API.
+
+- `tobiifreed` now enables the loopback WebSocket server by default
+- pass `--no-ws` to disable WebSocket
+- pass `--no-unix` to disable the Unix socket on macOS/Linux
+- on Windows, WebSocket/TCP is the intended client transport
+
+The binary payloads sent over WebSocket use the daemon protocol documented in
+`/home/runner/work/tobiifree/tobiifree/ARCHITECTURE.md`.
 
 ## License
 

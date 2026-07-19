@@ -137,7 +137,7 @@ daemon protocol. This is the framing between daemon clients and tobiifreed:
 The daemon owns the USB device and its Tracker. It:
 
 1. Opens USB, runs the TTP handshake (hello → realm → display area → subscribe)
-2. Listens on Unix socket + optionally WebSocket (`--ws`)
+2. Listens on loopback WebSocket/TCP by default and, on Unix platforms, an optional Unix socket
 3. Accepts client connections
 4. Forwards client commands to the Tracker over TTP
 5. Broadcasts gaze samples and command responses to subscribed clients
@@ -145,7 +145,7 @@ The daemon owns the USB device and its Tracker. It:
 ```
 ┌─────────┐      ┌─────────┐      ┌──────────┐
 │ Browser  │─ws──▶│         │      │          │
-│          │      │ tobiifreed  │─usb──▶  ET5     │
+│ Avalonia │─ws──▶│ tobiifreed  │─usb──▶  ET5     │
 │ App      │─sock▶│         │      │          │
 └─────────┘      └─────────┘      └──────────┘
 ```

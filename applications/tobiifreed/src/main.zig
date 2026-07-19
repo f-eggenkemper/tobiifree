@@ -1,17 +1,19 @@
 // tobiifreed — eye tracker daemon.
 //
 // Owns the USB connection to the Tobii ET5 and exposes gaze data
-// over a unix socket. Multiple clients can connect simultaneously.
+// over loopback WebSocket/TCP plus an optional unix socket.
 //
 // Usage:
 //   tobiifreed                   # run with defaults or ~/.config/tobii.json
 //   tobiifreed --init-config     # create default config file
 
 const std = @import("std");
+const builtin = @import("builtin");
 const core = @import("tobiifree_core");
 const Tracker = @import("tracker").Tracker;
 const LibusbTransport = @import("libusb_transport").LibusbTransport;
-const Server = @import("server").Server;
+const ipc_server = @import("server");
+const Server = ipc_server.Server;
 const WsServer = @import("ws_server").WsServer;
 
 const log = std.log.scoped(.tobiifreed);
@@ -29,8 +31,10 @@ const proto = @import("daemon_protocol");
 var transport: LibusbTransport = undefined;
 var tracker: Tracker = undefined;
 var server: Server = undefined;
+var server_running: bool = false;
 var ws: ?WsServer = null;
 var quit: bool = false;
+var notify_pipe_ready: bool = false;
 
 // ── Gaze ring buffer: USB thread → main thread ─────────────────────
 //
@@ -51,15 +55,19 @@ fn onGaze(sample: *const core.GazeSample) void {
     const w = gaze_write.load(.monotonic);
     gaze_ring[w % GAZE_RING_SIZE] = sample.*;
     gaze_write.store(w +% 1, .release);
-    // Wake main thread (non-blocking write, ok if pipe buffer is full).
-    _ = std.posix.write(notify_pipe[1], &.{1}) catch {};
+    if (notify_pipe_ready and builtin.os.tag != .windows) {
+        // Wake main thread (non-blocking write, ok if pipe buffer is full).
+        _ = std.posix.write(notify_pipe[1], &.{1}) catch {};
+    }
 }
 
 /// Drain the ring buffer and broadcast (called from main thread).
 fn drainGaze() void {
-    // Drain notification pipe.
-    var drain_buf: [64]u8 = undefined;
-    _ = std.posix.read(notify_pipe[0], &drain_buf) catch {};
+    if (notify_pipe_ready and builtin.os.tag != .windows) {
+        // Drain notification pipe.
+        var drain_buf: [64]u8 = undefined;
+        _ = std.posix.read(notify_pipe[0], &drain_buf) catch {};
+    }
 
     const w = gaze_write.load(.acquire);
     while (gaze_read != w) {
@@ -71,7 +79,7 @@ fn drainGaze() void {
                 sample.gaze_point_2d_norm[0], sample.gaze_point_2d_norm[1],
             });
         }
-        server.broadcastGaze(sample);
+        if (server_running) server.broadcastGaze(sample);
         if (ws) |*w_| w_.broadcastGaze(sample);
         gaze_read +%= 1;
     }
@@ -354,6 +362,7 @@ fn handleSignal(_: c_int) callconv(.c) void {
 }
 
 fn installSignalHandlers() void {
+    if (builtin.os.tag == .windows) return;
     const act = std.posix.Sigaction{
         .handler = .{ .handler = handleSignal },
         .mask = std.posix.sigemptyset(),
@@ -369,7 +378,8 @@ pub fn main() void {
     // Parse arguments.
     var ws_addr: u32 = std.mem.nativeToBig(u32, 0x7f000001); // 127.0.0.1
     var ws_port: u16 = 7081;
-    var ws_enabled: bool = false;
+    var ws_enabled: bool = true;
+    var unix_enabled: bool = ipc_server.supported;
 
     var args = std.process.args();
     _ = args.next();
@@ -383,11 +393,15 @@ pub fn main() void {
             if (args.next()) |ws_arg| {
                 if (ws_arg.len > 0 and ws_arg[0] == '-') {
                     // Not a WS argument, it's another flag — rewind not possible,
-                    // but we only have --ws and --init-config so this won't happen.
+                    // but our flags are simple enough that this is acceptable.
                     continue;
                 }
                 parseWsArg(ws_arg, &ws_addr, &ws_port);
             }
+        } else if (std.mem.eql(u8, arg, "--no-ws")) {
+            ws_enabled = false;
+        } else if (std.mem.eql(u8, arg, "--no-unix")) {
+            unix_enabled = false;
         }
     }
 
@@ -429,12 +443,15 @@ pub fn main() void {
     // Install response hook for command forwarding.
     core.set_hooks(null, null, onResponse, null, null);
 
-    // Start socket server.
-    server = Server.init(&forwardCommand) catch |err| {
-        log.err("failed to start server: {}", .{err});
-        return;
-    };
-    defer server.deinit();
+    // Start Unix socket server when supported/enabled.
+    if (unix_enabled) {
+        server = Server.init(&forwardCommand) catch |err| {
+            log.err("failed to start server: {}", .{err});
+            return;
+        };
+        server_running = true;
+    }
+    defer if (server_running) server.deinit();
 
     // Start WebSocket server (if enabled).
     if (ws_enabled) {
@@ -445,15 +462,23 @@ pub fn main() void {
     }
     defer if (ws) |*w| w.deinit();
 
-    // Set up notification pipe (non-blocking read end).
-    notify_pipe = std.posix.pipe2(.{ .NONBLOCK = true }) catch |err| {
-        log.err("failed to create pipe: {}", .{err});
+    if (!server_running and !ws_enabled) {
+        log.err("no IPC transports enabled; leave WebSocket enabled or omit --no-unix", .{});
         return;
-    };
-    defer {
+    }
+
+    if (builtin.os.tag != .windows) {
+        // Set up notification pipe (non-blocking read end).
+        notify_pipe = std.posix.pipe2(.{ .NONBLOCK = true }) catch |err| {
+            log.err("failed to create pipe: {}", .{err});
+            return;
+        };
+        notify_pipe_ready = true;
+    }
+    defer if (notify_pipe_ready and builtin.os.tag != .windows) {
         std.posix.close(notify_pipe[0]);
         std.posix.close(notify_pipe[1]);
-    }
+    };
 
     installSignalHandlers();
 
@@ -470,8 +495,10 @@ pub fn main() void {
         // Check for gaze data from USB thread.
         drainGaze();
         // Service client connections.
-        server.acceptClients();
-        server.readCommands();
+        if (server_running) {
+            server.acceptClients();
+            server.readCommands();
+        }
         if (ws) |*w| {
             w.acceptClients();
             w.readClients();

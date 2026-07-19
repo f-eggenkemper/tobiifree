@@ -96,7 +96,7 @@ overlay-dev:
 # Daemon (tobiifreed)
 # -------------------------------------------------------------------
 
-# Build and run the gaze daemon (add --ws to enable WebSocket)
+# Build and run the gaze daemon sidecar (WebSocket enabled by default)
 tobiifreed *ARGS:
     cd applications/tobiifreed && zig build run -- {{ARGS}}
 
