@@ -385,12 +385,13 @@ pub fn main() void {
     var args = std.process.args();
     _ = args.next();
     while (args.next()) |arg| {
-        if (ws_arg_pending and !isFlag(arg)) {
-            ws_arg_pending = false;
+        const pending_ws_arg = ws_arg_pending;
+        ws_arg_pending = false;
+
+        if (pending_ws_arg and !isFlag(arg)) {
             parseWsArg(arg, &ws_addr, &ws_port);
             continue;
         }
-        if (ws_arg_pending) ws_arg_pending = false;
 
         if (std.mem.eql(u8, arg, "--init-config")) {
             initConfig();
@@ -404,7 +405,7 @@ pub fn main() void {
         } else if (std.mem.eql(u8, arg, "--no-unix")) {
             unix_enabled = false;
         } else {
-            log.err("unknown argument: {s}", .{arg});
+            log.err("unknown argument: {s} (valid: --init-config, --ws [addr:port|port], --no-ws, --no-unix)", .{arg});
             return;
         }
     }
