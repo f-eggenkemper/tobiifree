@@ -380,24 +380,26 @@ pub fn main() void {
     var ws_port: u16 = 7081;
     var ws_enabled: bool = true;
     var unix_enabled: bool = ipc_server.supported;
+    var ws_arg_pending: bool = false;
 
     var args = std.process.args();
     _ = args.next();
     while (args.next()) |arg| {
+        if (ws_arg_pending) {
+            if (!(arg.len > 0 and arg[0] == '-')) {
+                parseWsArg(arg, &ws_addr, &ws_port);
+                ws_arg_pending = false;
+                continue;
+            }
+            ws_arg_pending = false;
+        }
+
         if (std.mem.eql(u8, arg, "--init-config")) {
             initConfig();
             return;
         } else if (std.mem.eql(u8, arg, "--ws")) {
             ws_enabled = true;
-            // Peek at next arg for optional address.
-            if (args.next()) |ws_arg| {
-                if (ws_arg.len > 0 and ws_arg[0] == '-') {
-                    // Not a WS argument, it's another flag — rewind not possible,
-                    // but our flags are simple enough that this is acceptable.
-                    continue;
-                }
-                parseWsArg(ws_arg, &ws_addr, &ws_port);
-            }
+            ws_arg_pending = true;
         } else if (std.mem.eql(u8, arg, "--no-ws")) {
             ws_enabled = false;
         } else if (std.mem.eql(u8, arg, "--no-unix")) {

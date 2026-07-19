@@ -79,7 +79,7 @@ inside the daemon while your UI talks to a stable loopback WebSocket API.
 - on Windows, WebSocket/TCP is the intended client transport
 
 The binary payloads sent over WebSocket use the daemon protocol documented in
-`/home/runner/work/tobiifree/tobiifree/ARCHITECTURE.md`.
+`ARCHITECTURE.md`.
 
 ## License
 
