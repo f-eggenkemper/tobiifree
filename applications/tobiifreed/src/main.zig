@@ -365,7 +365,7 @@ fn installSignalHandlers() void {
     if (builtin.os.tag == .windows) return;
     const act = std.posix.Sigaction{
         .handler = .{ .handler = handleSignal },
-        .mask = std.posix.sigemptyset(),
+        .mask = std.posix.empty_sigset,
         .flags = 0,
     };
     std.posix.sigaction(std.posix.SIG.TERM, &act, null);

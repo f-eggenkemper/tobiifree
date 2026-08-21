@@ -16,7 +16,7 @@ pub const LibusbTransport = struct {
     usb_handle: ?*c.libusb_device_handle,
 
     const VID: u16 = 0x2104;
-    const PID: u16 = 0x0313;
+    const PID: u16 = 0x0127;
     const EP_IN: u8 = 0x83;
     const EP_OUT: u8 = 0x05;
 
