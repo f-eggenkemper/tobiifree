@@ -54,6 +54,7 @@ public sealed class TobiiFreeDriver : IAsyncDisposable
     private readonly ConcurrentDictionary<uint, TaskCompletionSource<byte[]>> _pending = new();
     private readonly List<byte> _incoming = new();
     private readonly object _incomingGate = new();
+    private readonly object _sequenceGate = new();
     private readonly Task _receiveLoop;
     private uint _nextSequence = 1;
     private uint? _calibrationRealmId;
@@ -154,7 +155,12 @@ public sealed class TobiiFreeDriver : IAsyncDisposable
 
     public async Task ApplyCalibrationAsync(ReadOnlyMemory<byte> calibrationBlob, CancellationToken cancellationToken = default)
     {
-        var realmId = await OpenCalibrationRealmAsync(cancellationToken).ConfigureAwait(false);
+        if (_calibrationRealmId is not null)
+        {
+            throw new InvalidOperationException("Finish or close the active calibration session before applying a saved calibration blob.");
+        }
+
+        await OpenCalibrationRealmAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             var payload = new byte[2 + calibrationBlob.Length];
@@ -165,7 +171,6 @@ public sealed class TobiiFreeDriver : IAsyncDisposable
         }
         finally
         {
-            _calibrationRealmId = realmId;
             await CloseCalibrationRealmAsync(cancellationToken).ConfigureAwait(false);
         }
     }
@@ -346,16 +351,23 @@ public sealed class TobiiFreeDriver : IAsyncDisposable
                 break;
             }
 
+            List<TobiiGazeSample> gazeSamples;
             lock (_incomingGate)
             {
                 _incoming.AddRange(chunk);
-                ParseIncomingFrames();
+                gazeSamples = ParseIncomingFrames();
+            }
+
+            foreach (var sample in gazeSamples)
+            {
+                GazeReceived?.Invoke(this, sample);
             }
         }
     }
 
-    private void ParseIncomingFrames()
+    private List<TobiiGazeSample> ParseIncomingFrames()
     {
+        var gazeSamples = new List<TobiiGazeSample>();
         while (_incoming.Count >= 8)
         {
             var span = CollectionsMarshal.AsSpan(_incoming);
@@ -367,16 +379,21 @@ public sealed class TobiiFreeDriver : IAsyncDisposable
 
             if (_incoming.Count < envelopeLength)
             {
-                return;
+                return gazeSamples;
             }
 
             var frame = span.Slice(0, envelopeLength).ToArray();
             _incoming.RemoveRange(0, envelopeLength);
-            DispatchInboundFrame(frame);
+            if (DispatchInboundFrame(frame) is { } sample)
+            {
+                gazeSamples.Add(sample);
+            }
         }
+
+        return gazeSamples;
     }
 
-    private void DispatchInboundFrame(ReadOnlySpan<byte> frame)
+    private TobiiGazeSample? DispatchInboundFrame(ReadOnlySpan<byte> frame)
     {
         var header = frame.Slice(8, 24);
         var magic = BinaryPrimitives.ReadUInt32BigEndian(header.Slice(0, 4));
@@ -392,14 +409,15 @@ public sealed class TobiiFreeDriver : IAsyncDisposable
                 pending.TrySetResult(payload.ToArray());
             }
 
-            return;
+            return null;
         }
 
         if (magic == TtpMagicNotify && operation == GazeStream)
         {
-            var sample = DecodeTlvGazeSample(payload);
-            GazeReceived?.Invoke(this, sample);
+            return DecodeTlvGazeSample(payload);
         }
+
+        return null;
     }
 
     private void FailPending(Exception exception)
@@ -415,9 +433,12 @@ public sealed class TobiiFreeDriver : IAsyncDisposable
 
     private uint NextSequence()
     {
-        var next = _nextSequence;
-        _nextSequence = _nextSequence == uint.MaxValue ? 1 : _nextSequence + 1;
-        return next;
+        lock (_sequenceGate)
+        {
+            var next = _nextSequence;
+            _nextSequence = _nextSequence == uint.MaxValue ? 1 : _nextSequence + 1;
+            return next;
+        }
     }
 
     private static byte[] TwoBytePrefix() => [0, 0];
@@ -896,7 +917,7 @@ public sealed class TobiiFreeDriver : IAsyncDisposable
 
                     if (handle == IntPtr.Zero)
                     {
-                        throw new IOException("Unable to find a supported Tobii ET5 runtime device.");
+                        throw new IOException("Unable to find a supported Tobii eye-tracking device matching the supplied vendor/product IDs.");
                     }
 
                     if (LibUsb.libusb_kernel_driver_active(handle, InterfaceNumber) == 1)

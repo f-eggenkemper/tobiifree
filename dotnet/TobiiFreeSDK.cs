@@ -259,7 +259,7 @@ public static class TobiiFreeSDK
                     break;
                 }
 
-                receiveBuffer.AddRange(buffer.AsSpan(0, result.Count).ToArray());
+                receiveBuffer.AddRange(new ArraySegment<byte>(buffer, 0, result.Count));
                 if (!result.EndOfMessage)
                 {
                     continue;
